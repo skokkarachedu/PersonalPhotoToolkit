@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-photo-toolkit"
+version = "2.0.1"
+description = "Cross-platform GUI toolkit for organizing and cleaning personal photo libraries."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = {text = "MIT"}
+authors = [{name = "Personal Photo Toolkit contributors"}]
+dependencies = [
+  "Pillow>=10.0",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "insightface>=0.7.3",
+  "onnxruntime>=1.17"
+]
+
+[project.optional-dependencies]
+ai = [
+  "torch>=2.1",
+  "transformers>=4.38",
+  "safetensors>=0.4"
+]
+
+[project.scripts]
+photo-toolkit = "photo_toolkit.app:main"
+
+[tool.setuptools]
+packages = ["photo_toolkit"]

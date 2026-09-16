@@ -1,0 +1,72 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Personal media - do not commit
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.bmp
+*.tif
+*.tiff
+*.heic
+*.heif
+*.dng
+*.nef
+*.cr2
+*.cr3
+*.arw
+*.rw2
+*.mp4
+*.mov
+*.m4v
+*.avi
+*.mts
+*.m2ts
+*.3gp
+*.mkv
+*.wmv
+
+# Google Photos exports / metadata
+Takeout/
+Google Photos/
+*.json
+
+# Generated output / reports
+*_Reports/
+_PhotoSorter-Reports/
+TripPhotoFilter_Report.csv
+PhotoCleaner_Report.csv
+Photos-Merged-Sorted*/
+Trip-Filtered*/
+Photos-Cleaned*/
+
+# AI/model caches
+.cache/
+huggingface/
+models/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Keep placeholder folder
+!reference_faces/.gitkeep
+
+# Repository documentation artwork is safe to commit
+!docs/
+!docs/images/
+!docs/images/*.png
+!docs/images/*.svg

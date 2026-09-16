@@ -1,0 +1,107 @@
+name: Build desktop releases
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Linux Tk
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install -r requirements-build.txt
+          python -m pip install -r requirements-ai.txt
+
+      - name: Build application
+        shell: bash
+        run: |
+          pyinstaller PersonalPhotoToolkit.spec --clean --noconfirm
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/PersonalPhotoToolkit.exe" -DestinationPath "dist/PersonalPhotoToolkit-Windows.zip"
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent "Personal Photo Toolkit.app" "PersonalPhotoToolkit-macOS.zip"
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          tar -C dist -czf dist/PersonalPhotoToolkit-Linux.tar.gz PersonalPhotoToolkit
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonalPhotoToolkit-Windows
+          path: dist/PersonalPhotoToolkit-Windows.zip
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonalPhotoToolkit-macOS
+          path: dist/PersonalPhotoToolkit-macOS.zip
+
+      - name: Upload Linux artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonalPhotoToolkit-Linux
+          path: dist/PersonalPhotoToolkit-Linux.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-files/PersonalPhotoToolkit-Windows/PersonalPhotoToolkit-Windows.zip
+            release-files/PersonalPhotoToolkit-macOS/PersonalPhotoToolkit-macOS.zip
+            release-files/PersonalPhotoToolkit-Linux/PersonalPhotoToolkit-Linux.tar.gz
+          generate_release_notes: true
