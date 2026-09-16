@@ -11,6 +11,17 @@
 
 ---
 
+## Modular installation (v2.1.0)
+
+The source setup installs only the small core required for **Organize by Year**. It no longer installs both AI stacks automatically.
+
+- `setup-windows.bat` — core application only.
+- `install-trip-filter.bat` — installs InsightFace/ONNX/OpenCV dependencies only when Trip Photo Filter is wanted. The face model is downloaded separately on first use.
+- `install-photo-cleaner.bat` — installs PyTorch/Transformers/CLIP dependencies only when Photo Cleaner is wanted. The CLIP model is downloaded/cached on first use.
+
+You can install one optional feature without installing the other. For example, a Photo Cleaner user does **not** need InsightFace or ONNX.
+
+
 ## Why I built this
 
 Modern phones make it very easy to collect thousands of photos and videos. Over time they end up spread across a phone, cloud photo libraries, WhatsApp folders, old computers and external hard disks. Copies accumulate, dates become confusing, screenshots and memes mix with real memories, and a friends' trip can leave you with hundreds of photos that do not contain you at all.
@@ -177,19 +188,20 @@ Read the full **[Privacy / Datenschutz notice](PRIVACY.md)** before using face m
 
 You do **not** need to know Python when using a packaged release.
 
-Go to the repository's **Releases** page and download the package for your operating system:
+Go to the repository's **Releases** page. Windows builds are published in separate editions so users download only the runtime they need:
 
 ```text
-Windows  → PersonalPhotoToolkit-Windows.zip
-macOS    → PersonalPhotoToolkit-macOS.zip
-Linux    → PersonalPhotoToolkit-Linux.tar.gz
+Windows Core     → Organizer only
+Windows Cleaner  → Organizer + Photo Cleaner
+Windows Trip     → Organizer + Trip Photo Filter
+Windows Full     → all three tools
 ```
 
-Extract/open the application and choose one of the three tools.
+Normal users do **not** run `pip`, create a `.venv`, or install Python. Optional large **model weights** are still downloaded only when the selected AI feature needs them and after the first-use notice.
 
-The packaged application contains its Python/runtime dependencies. Optional large **model weights** are downloaded only when an AI feature needs them and after the first-use notice. This is more reliable than running `pip install` on an end user's computer.
+Official Windows releases should be Authenticode-signed. The project never recommends disabling Microsoft Defender, Smart App Control, Windows Application Control, Gatekeeper, or other operating-system security controls. If a managed computer blocks a component, use an approved signed build or contact the device administrator.
 
-> Current community builds may be unsigned. Windows SmartScreen or macOS Gatekeeper can therefore display a warning until official code signing/notarization is configured.
+macOS CI output remains explicitly marked `UNSIGNED` until Developer ID signing and notarization credentials are configured. See `RELEASE_SECURITY.md`.
 
 ---
 
@@ -215,7 +227,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
-pip install -r requirements-ai.txt
+pip install -e ".[full]"  # developers who intentionally want every optional feature
 python run.py
 ```
 
@@ -226,8 +238,8 @@ python run.py
 | Feature | Built into app? | First-use behavior |
 |---|---|---|
 | Organize by Year | Yes | No AI model needed. |
-| Trip Photo Filter | Runtime included | UI asks before downloading the InsightFace model (~326 MB). |
-| Photo Cleaner | Runtime included in full release | UI asks before downloading/caching the CLIP model. |
+| Trip Photo Filter | Only in Trip/Full edition | UI asks before downloading the InsightFace model (~326 MB). |
+| Photo Cleaner | Only in Cleaner/Full edition | UI asks before downloading/caching the CLIP model. |
 
 Once cached, the models are reused. A network connection is not intended to be necessary for normal local inference after required models are present.
 
@@ -299,7 +311,14 @@ Contributions are welcome. Useful areas include:
 
 Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[SECURITY.md](SECURITY.md)**.
 
-### Privacy rule for contributions
+#
+### Trip Filter performance modes
+
+Trip Photo Filter offers three CPU-oriented modes. **Balanced** is the recommended default. **Fast** downsizes only the in-memory analysis copy (maximum dimension 960 px) and uses a smaller detector; originals and copied output files remain untouched. **Balanced** analyzes up to 1600 px with a 640 px detector. **Maximum precision** keeps original analysis resolution and uses the larger 1280 px detector, which can be substantially slower on large libraries. Progress logs show photos/second and an approximate ETA.
+
+Exact duplicates are hashed and skipped before face recognition. Accuracy/validation calibration is optional and adds extra processing because the labeled validation folders must also be analyzed.
+
+## Privacy rule for contributions
 
 **Never commit real private photo libraries, reference faces, Google Takeout archives, face embeddings or generated personal reports.** Use synthetic or explicitly redistributable test assets.
 
@@ -316,7 +335,7 @@ Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[SECURITY.md](SECURITY.
 - [x] First-use privacy/model-download notices
 - [x] Validation-based face-recognition accuracy report
 - [x] GitHub Actions desktop builds
-- [ ] Signed Windows installer
+- [x] Windows signing workflow prepared (requires repository code-signing certificate secrets)
 - [ ] Signed/notarized macOS app
 - [ ] Optional lightweight release without AI models
 - [ ] Better near-duplicate review UI
@@ -330,3 +349,9 @@ Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[SECURITY.md](SECURITY.
 Project source: see [LICENSE](LICENSE).
 
 Third-party dependencies and AI model weights retain their own licenses.
+
+## Modular / lazy AI loading
+
+The core GUI and **Organize by Year** do not import Trip Filter or Photo Cleaner AI libraries at startup. Trip Filter loads InsightFace/ONNX only when **Start trip filter** is clicked. Photo Cleaner loads Torch/Transformers/CLIP only when **Start cleaner** is clicked. This means an unavailable or Windows-blocked Trip Filter dependency must not prevent the core app or Photo Cleaner from opening.
+
+For a clean source installation, run `setup-windows.bat` first. Install only the feature you need with `install-trip-filter.bat` or `install-photo-cleaner.bat`.

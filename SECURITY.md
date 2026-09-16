@@ -6,3 +6,8 @@
 - Do not commit personal photos, Google Takeout exports, generated face data, or reports.
 - AI models are downloaded only after the user confirms the first-use notice.
 - Report suspected security or privacy issues through the repository's private security-reporting feature when enabled.
+
+
+## Operating-system security controls
+
+Do not disable Defender, Smart App Control, Windows Application Control, Gatekeeper, or equivalent controls to run this project. On managed devices, use an administrator-approved build or contact the device administrator. Official Windows releases are intended to be Authenticode-signed; CI only signs when authorized certificate secrets are configured. See `RELEASE_SECURITY.md`.

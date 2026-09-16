@@ -6,6 +6,7 @@ import hashlib
 import math
 import shutil
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -16,6 +17,13 @@ VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mts", ".m2ts", ".3gp", ".mkv", "
 
 DEFAULT_KEEP_THRESHOLD = 0.43
 DEFAULT_REVIEW_THRESHOLD = 0.34
+
+PERFORMANCE_PROFILES = {
+    # Analysis images are resized in memory only. Originals are never modified.
+    "fast": {"label": "Fast", "det_size": (640, 640), "max_dimension": 960, "top_k": 1},
+    "balanced": {"label": "Balanced", "det_size": (640, 640), "max_dimension": 1600, "top_k": 3},
+    "precision": {"label": "Maximum precision", "det_size": (1280, 1280), "max_dimension": None, "top_k": 3},
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -64,10 +72,20 @@ def cosine(a, b) -> float:
 
 
 class InsightFaceMatcher:
-    def __init__(self, high_accuracy=True, log=lambda s: None):
+    def __init__(self, performance_mode="balanced", log=lambda s: None):
         self.log = log
-        self.det_size = (1280, 1280) if high_accuracy else (640, 640)
-        self.log(f"Loading InsightFace buffalo_l (detector size {self.det_size[0]}x{self.det_size[1]})...")
+        if performance_mode not in PERFORMANCE_PROFILES:
+            performance_mode = "balanced"
+        self.performance_mode = performance_mode
+        self.profile = PERFORMANCE_PROFILES[performance_mode]
+        self.det_size = self.profile["det_size"]
+        self.max_dimension = self.profile["max_dimension"]
+        self.top_k = self.profile["top_k"]
+        self.log(
+            f"Loading InsightFace buffalo_l - {self.profile['label']} mode "
+            f"(detector {self.det_size[0]}x{self.det_size[1]}, "
+            f"analysis max {self.max_dimension or 'original'} px)..."
+        )
         self.app = FaceAnalysis(
             name="buffalo_l",
             providers=["CPUExecutionProvider"],
@@ -76,8 +94,24 @@ class InsightFaceMatcher:
         self.app.prepare(ctx_id=-1, det_size=self.det_size)
         self.references = None
 
-    def faces(self, path: Path):
+    def _analysis_image(self, path: Path):
         img = read_image(path)
+        if img is None:
+            return None
+        if self.max_dimension:
+            h, w = img.shape[:2]
+            longest = max(h, w)
+            if longest > self.max_dimension:
+                scale = self.max_dimension / float(longest)
+                img = cv2.resize(
+                    img,
+                    (max(1, int(w * scale)), max(1, int(h * scale))),
+                    interpolation=cv2.INTER_AREA,
+                )
+        return img
+
+    def faces(self, path: Path):
+        img = self._analysis_image(path)
         if img is None:
             return []
         return self.app.get(img)
@@ -92,15 +126,10 @@ class InsightFaceMatcher:
         )
 
     def build_reference_bank(self, reference_dir: Path):
-        files = [
-            p for p in reference_dir.rglob("*")
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTS
-        ]
+        files = [p for p in reference_dir.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
         if not files:
             raise RuntimeError("No reference photos found.")
-
-        refs = []
-        accepted_names = []
+        refs, accepted_names = [], []
         for path in files:
             try:
                 faces = self.faces(path)
@@ -113,16 +142,9 @@ class InsightFaceMatcher:
                 self.log(f"Reference accepted: {path.name}")
             except Exception as e:
                 self.log(f"Reference error {path.name}: {e}")
-
         if len(refs) < 3:
-            raise RuntimeError(
-                f"Only {len(refs)} usable references found. "
-                "Use at least 5-10 clear SOLO reference photos."
-            )
-
+            raise RuntimeError(f"Only {len(refs)} usable references found. Use at least 5-10 clear SOLO reference photos.")
         refs = np.asarray(refs, dtype=np.float32)
-
-        # Remove obvious outlier reference photos when enough references are available.
         if len(refs) >= 6:
             medians = []
             for i in range(len(refs)):
@@ -135,7 +157,6 @@ class InsightFaceMatcher:
             if removed and int(keep.sum()) >= 3:
                 refs = refs[keep]
                 self.log("Ignored likely reference outliers: " + ", ".join(removed))
-
         self.references = refs
         self.log(f"Reference embeddings ready: {len(refs)}")
         return len(refs)
@@ -143,12 +164,8 @@ class InsightFaceMatcher:
     def face_score(self, embedding) -> float:
         if self.references is None:
             raise RuntimeError("Reference bank not built.")
-        sims = sorted(
-            (cosine(embedding, ref) for ref in self.references),
-            reverse=True,
-        )
-        # Top-k average is more stable than a single lucky match.
-        k = min(3, len(sims))
+        sims = sorted((cosine(embedding, ref) for ref in self.references), reverse=True)
+        k = min(self.top_k, len(sims))
         return float(np.mean(sims[:k]))
 
     def photo_score(self, path: Path):
@@ -241,7 +258,8 @@ def filter_trip_photos(
     output: Path,
     positive_validation: Path | None = None,
     negative_validation: Path | None = None,
-    high_accuracy: bool = True,
+    high_accuracy: bool | None = None,
+    performance_mode: str = "balanced",
     auto_calibrate: bool = False,
     cancel_event: threading.Event | None = None,
     progress=None,
@@ -253,7 +271,10 @@ def filter_trip_photos(
     if source == output or source in output.parents:
         raise RuntimeError("Output must be outside the source folder.")
 
-    matcher = InsightFaceMatcher(high_accuracy=high_accuracy, log=log)
+    # Backward compatibility: old callers that explicitly pass high_accuracy still work.
+    if high_accuracy is not None and performance_mode == "balanced":
+        performance_mode = "precision" if high_accuracy else "fast"
+    matcher = InsightFaceMatcher(performance_mode=performance_mode, log=log)
     matcher.build_reference_bank(references)
 
     keep_threshold = DEFAULT_KEEP_THRESHOLD
@@ -293,6 +314,9 @@ def filter_trip_photos(
         "Exact duplicates skipped": 0,
         "Videos separated": 0,
     }
+
+    started_at = time.perf_counter()
+    processed_for_rate = 0
 
     for idx, path in enumerate(files, 1):
         if cancel_event and cancel_event.is_set():
@@ -345,8 +369,14 @@ def filter_trip_photos(
                 keep_threshold, review_threshold
             ])
 
+        processed_for_rate += 1
         if idx % 25 == 0 or idx == len(files):
-            log(f"Processed {idx}/{len(files)}")
+            elapsed = max(0.001, time.perf_counter() - started_at)
+            rate = processed_for_rate / elapsed
+            remaining = max(0, len(files) - idx)
+            eta_seconds = remaining / rate if rate > 0 else 0
+            eta_min = eta_seconds / 60.0
+            log(f"Processed {idx}/{len(files)} | {rate:.2f} photos/s | ETA ~{eta_min:.1f} min")
         if progress:
             progress(idx, len(files))
 

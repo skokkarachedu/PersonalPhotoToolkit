@@ -93,7 +93,7 @@ def clean_photos(
         import torch
     except Exception as e:
         raise RuntimeError(
-            "AI dependencies are missing. Install them with: pip install -e .[ai]"
+            "AI dependencies are missing. Install them with: pip install -e .[cleaner] (Windows: run install-photo-cleaner.bat)"
         ) from e
 
     source = source.resolve()

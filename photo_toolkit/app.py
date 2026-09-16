@@ -11,8 +11,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from .sorter import organize_by_year
-from .trip_filter import filter_trip_photos
-from .cleaner import clean_photos
 
 class PhotoToolkitApp(tk.Tk):
     def __init__(self):
@@ -160,8 +158,21 @@ class PhotoToolkitApp(tk.Tk):
         self.trip_val_neg = self._path_picker(f, 6, "Validation: person ABSENT")
         self.trip_calibrate = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Auto-calibrate and create Accuracy_Report.txt", variable=self.trip_calibrate).grid(row=7, column=1, sticky="w", padx=8, pady=6)
-        ttk.Label(f, text="Uses local InsightFace buffalo_l (~326 MB model download on first use).", wraplength=760).grid(row=8, column=1, sticky="w", padx=8, pady=4)
-        ttk.Button(f, text="Start trip filter", command=self._run_trip).grid(row=9, column=1, sticky="w", padx=8, pady=12)
+
+        ttk.Label(f, text="Processing mode").grid(row=8, column=0, sticky="w", padx=10, pady=6)
+        self.trip_performance = tk.StringVar(value="balanced")
+        mode_frame = ttk.Frame(f)
+        mode_frame.grid(row=8, column=1, sticky="w", padx=8, pady=6)
+        ttk.Radiobutton(mode_frame, text="Fast", value="fast", variable=self.trip_performance).pack(side="left", padx=(0, 14))
+        ttk.Radiobutton(mode_frame, text="Balanced (recommended)", value="balanced", variable=self.trip_performance).pack(side="left", padx=(0, 14))
+        ttk.Radiobutton(mode_frame, text="Maximum precision", value="precision", variable=self.trip_performance).pack(side="left")
+        ttk.Label(
+            f,
+            text="Fast analyzes smaller copies; Balanced is recommended; Maximum precision uses full-size analysis and can be much slower. Originals are never resized or modified.",
+            wraplength=800
+        ).grid(row=9, column=1, sticky="w", padx=8, pady=(0,4))
+        ttk.Label(f, text="Uses local InsightFace buffalo_l (~326 MB model download on first use).", wraplength=760).grid(row=10, column=1, sticky="w", padx=8, pady=4)
+        ttk.Button(f, text="Start trip filter", command=self._run_trip).grid(row=11, column=1, sticky="w", padx=8, pady=12)
 
     def _build_clean_tab(self):
         f = self.clean_tab
@@ -267,12 +278,27 @@ class PhotoToolkitApp(tk.Tk):
         pos = Path(self.trip_val_pos.get()) if self.trip_val_pos.get().strip() else None
         neg = Path(self.trip_val_neg.get()) if self.trip_val_neg.get().strip() else None
         calibrate = self.trip_calibrate.get()
+        performance_mode = self.trip_performance.get()
         if calibrate and (not pos or not neg):
             messagebox.showwarning("Validation folders needed", "Select both PRESENT and ABSENT validation folders, or disable auto-calibration.")
             return
+        try:
+            # Lazy import: Trip Filter and its native AI dependencies are loaded ONLY here.
+            from .trip_filter import filter_trip_photos
+        except (ModuleNotFoundError, ImportError, OSError) as e:
+            messagebox.showerror(
+                "Trip Photo Filter unavailable",
+                "The core app is still usable.\n\n"
+                "This optional component is not available in the current installation.\n\n"
+                "Source users can install the Trip feature pack with install-trip-filter.bat. "
+                "Packaged-release users should download the Trip or Full edition from the official Releases page.\n\n"
+                "If Windows Application Control blocks a native AI/DLL component, keep the security policy enabled "
+                "and use an officially signed release or a computer where the component is permitted.\n\nDetails: " + str(e)
+            )
+            return
         self._start_worker(lambda: filter_trip_photos(
             src, refs, dst, positive_validation=pos, negative_validation=neg,
-            high_accuracy=True, auto_calibrate=calibrate, cancel_event=self.cancel_event,
+            performance_mode=performance_mode, auto_calibrate=calibrate, cancel_event=self.cancel_event,
             progress=self._progress, log=self._log
         ))
 
@@ -286,6 +312,19 @@ class PhotoToolkitApp(tk.Tk):
             "Photo Cleaner needs a CLIP AI model. The model is downloaded on first use and cached locally.",
             "Image classification runs locally after the model download. Selected photos are not intentionally uploaded by this application."
         ):
+            return
+        try:
+            # Lazy import: Torch/Transformers/CLIP are loaded ONLY when Cleaner is started.
+            from .cleaner import clean_photos
+        except (ModuleNotFoundError, ImportError, OSError) as e:
+            messagebox.showerror(
+                "Photo Cleaner unavailable",
+                "The core app is still usable.\n\n"
+                "This optional component is not available in the current installation.\n\n"
+                "Source users can install the Cleaner feature pack with install-photo-cleaner.bat. "
+                "Packaged-release users should download the Cleaner or Full edition from the official Releases page.\n\n"
+                "Do not disable Windows security controls to run this feature.\n\nDetails: " + str(e)
+            )
             return
         self._start_worker(lambda: clean_photos(
             src, dst, cancel_event=self.cancel_event,

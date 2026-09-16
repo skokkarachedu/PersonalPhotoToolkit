@@ -10,98 +10,115 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-windows:
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-
+        include:
+          - edition: Core
+            extras: ""
+          - edition: Cleaner
+            extras: "cleaner"
+          - edition: Trip
+            extras: "trip"
+          - edition: Full
+            extras: "full"
+    env:
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+      - name: Install edition dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ("${{ matrix.extras }}" -eq "") { python -m pip install -e . }
+          else { python -m pip install -e ".[${{ matrix.extras }}]" }
+          python -m pip install -r requirements-build.txt
+      - name: Build edition
+        shell: pwsh
+        env:
+          PPT_EDITION: ${{ matrix.edition }}
+        run: pyinstaller PersonalPhotoToolkit.spec --clean --noconfirm
+      - name: Sign Windows executable when certificate is configured
+        if: env.WINDOWS_CERTIFICATE_BASE64 != '' && env.WINDOWS_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $cert = Join-Path $env:RUNNER_TEMP "ppt-signing.pfx"
+          [IO.File]::WriteAllBytes($cert, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $cert /p $env:WINDOWS_CERTIFICATE_PASSWORD "dist\PersonalPhotoToolkit.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed" }
+          & $signtool verify /pa /v "dist\PersonalPhotoToolkit.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed" }
+          Remove-Item $cert -Force
+      - name: Package Windows edition
+        shell: pwsh
+        run: Compress-Archive -Path "dist/PersonalPhotoToolkit.exe" -DestinationPath "dist/PersonalPhotoToolkit-Windows-${{ matrix.edition }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PersonalPhotoToolkit-Windows-${{ matrix.edition }}
+          path: dist/PersonalPhotoToolkit-Windows-${{ matrix.edition }}.zip
 
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
       - name: Install Linux Tk
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-tk
-
-      - name: Install dependencies
-        shell: bash
+      - name: Install full dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install -e ".[full]"
           python -m pip install -r requirements-build.txt
-          python -m pip install -r requirements-ai.txt
-
       - name: Build application
-        shell: bash
-        run: |
-          pyinstaller PersonalPhotoToolkit.spec --clean --noconfirm
-
-      - name: Package Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "dist/PersonalPhotoToolkit.exe" -DestinationPath "dist/PersonalPhotoToolkit-Windows.zip"
-
-      - name: Package macOS
+        run: pyinstaller PersonalPhotoToolkit.spec --clean --noconfirm
+      - name: Package macOS development build
         if: runner.os == 'macOS'
-        shell: bash
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent "Personal Photo Toolkit.app" "PersonalPhotoToolkit-macOS.zip"
-
+          ditto -c -k --sequesterRsrc --keepParent "Personal Photo Toolkit.app" "PersonalPhotoToolkit-macOS-Full-UNSIGNED.zip"
       - name: Package Linux
         if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          tar -C dist -czf dist/PersonalPhotoToolkit-Linux.tar.gz PersonalPhotoToolkit
-
-      - name: Upload Windows artifact
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: PersonalPhotoToolkit-Windows
-          path: dist/PersonalPhotoToolkit-Windows.zip
-
-      - name: Upload macOS artifact
+        run: tar -C dist -czf dist/PersonalPhotoToolkit-Linux-Full.tar.gz PersonalPhotoToolkit
+      - uses: actions/upload-artifact@v4
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
         with:
-          name: PersonalPhotoToolkit-macOS
-          path: dist/PersonalPhotoToolkit-macOS.zip
-
-      - name: Upload Linux artifact
+          name: PersonalPhotoToolkit-macOS-Full-UNSIGNED
+          path: dist/PersonalPhotoToolkit-macOS-Full-UNSIGNED.zip
+      - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
         with:
-          name: PersonalPhotoToolkit-Linux
-          path: dist/PersonalPhotoToolkit-Linux.tar.gz
+          name: PersonalPhotoToolkit-Linux-Full
+          path: dist/PersonalPhotoToolkit-Linux-Full.tar.gz
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build-windows, build-unix]
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: release-files
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release-files/PersonalPhotoToolkit-Windows/PersonalPhotoToolkit-Windows.zip
-            release-files/PersonalPhotoToolkit-macOS/PersonalPhotoToolkit-macOS.zip
-            release-files/PersonalPhotoToolkit-Linux/PersonalPhotoToolkit-Linux.tar.gz
+          files: release-files/**/*
           generate_release_notes: true

@@ -36,10 +36,13 @@ if not exist ".venv\Scripts\python.exe" (
 set "VPY=%CD%\.venv\Scripts\python.exe"
 "%VPY%" -m pip install --upgrade pip setuptools wheel || goto :error
 "%VPY%" -m pip install -e . || goto :error
-"%VPY%" -m pip install -r requirements-ai.txt || goto :error
 
 echo.
-echo SUCCESS: setup completed.
+echo SUCCESS: core setup completed.
+echo.
+echo Optional features are NOT installed automatically.
+echo Run install-trip-filter.bat only if you want Trip Photo Filter.
+echo Run install-photo-cleaner.bat only if you want Photo Cleaner.
 echo Start the app with start-windows.bat
 echo.
 pause

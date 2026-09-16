@@ -5,7 +5,11 @@ import sys
 
 project_root = Path(SPECPATH).resolve()
 
-hiddenimports = collect_submodules("cv2")
+hiddenimports = []
+try:
+    hiddenimports += collect_submodules("cv2")
+except Exception:
+    pass
 datas = [(str(project_root / "PRIVACY.md"), "."), (str(project_root / "README.md"), ".")]
 try:
     datas += collect_data_files("cv2")
