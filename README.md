@@ -11,41 +11,54 @@
 
 ---
 
-## Modular installation (v2.1.0)
+## Modular installation and in-app setup
 
 The source setup installs only the small core required for **Organize by Year**. It no longer installs both AI stacks automatically.
 
-- `setup-windows.bat` — core application only.
-- `install-trip-filter.bat` — installs InsightFace/ONNX/OpenCV dependencies only when Trip Photo Filter is wanted. The face model is downloaded separately on first use.
-- `install-photo-cleaner.bat` — installs PyTorch/Transformers/CLIP dependencies only when Photo Cleaner is wanted. The CLIP model is downloaded/cached on first use.
+- The initial source setup installs only the core application.
+- When **Trip Photo Filter** is selected for the first time, the GUI can ask permission to install its optional InsightFace/ONNX/OpenCV feature pack. The face model is downloaded separately on first use.
+- When **Photo Cleaner** is selected for the first time, the GUI can ask permission to install its optional PyTorch/Transformers/CLIP feature pack. The CLIP model is downloaded/cached on first use.
 
-You can install one optional feature without installing the other. For example, a Photo Cleaner user does **not** need InsightFace or ONNX.
+The old feature-install scripts remain useful for developers and troubleshooting, but ordinary source users should not need to search for them manually. Installing one optional feature does **not** require installing the other.
 
 
 ## Why I built this
 
-Modern phones make it very easy to collect thousands of photos and videos. Over time they end up spread across a phone, cloud photo libraries, WhatsApp folders, old computers and external hard disks. Copies accumulate, dates become confusing, screenshots and memes mix with real memories, and a friends' trip can leave you with hundreds of photos that do not contain you at all.
+Modern phones capture high-resolution photos and videos, which means a normal camera roll can grow by many gigabytes surprisingly quickly. The same collection is often synchronized to a cloud photo service, where available storage is also limited. Eventually the phone fills up, the cloud account approaches its storage limit, and the same memories may also be scattered across old computers, WhatsApp folders and external drives.
 
-Cloud storage is convenient, but space is finite and large photo/video libraries can consume many GB. Many people already own a large hard disk or SSD and simply want to move their memories there **without creating another chaotic backup folder**.
+This project started from a practical workflow: **export the cloud library, copy the phone library to a computer, combine it with existing photo folders, organize everything locally, and then archive it to storage you control.**
 
-Personal Photo Toolkit is intended for exactly that workflow:
+For example, Google Photos can be exported with **Google Takeout**. Phone photos/videos and older folders can then be copied to the computer and processed together:
 
 ```text
-Phone + Google Photos export + old disks
-                  │
-                  ▼
-        Personal Photo Toolkit
-          ┌───────┼────────┐
-          ▼       ▼        ▼
-       Organize   Trip     Clean
-       by year    Filter   clutter
-          │       │        │
-          └───────┼────────┘
-                  ▼
-       Organized hard drive
+📱 Phone photos & videos ────────┐
+                                 │
+☁️ Google Photos / Takeout ──────┼──► 📂 Personal Photo Toolkit
+                                 │              │
+💻 Existing / old photo folders ─┘              │
+                                                ▼
+                                      Organized Archive
+                                                │
+                         ┌──────────────────────┼──────────────────────┐
+                         ▼                      ▼                      ▼
+                      💾 HDD/SSD             🖥️ NAS               ☁️ Cloud
+                         │                                             │
+                         └──────── optional independent backup ────────┘
 ```
 
-It is one desktop app with **three focused tools**. You can use only the tool you need.
+Instead of moving one large, messy folder from the phone or cloud to an external disk, Personal Photo Toolkit prepares a more useful archive: photos and videos can be separated and organized by year, exact duplicate files can be skipped, trip collections can be filtered, and screenshots/memes/documents/random downloads can be separated from personal memories.
+
+After the archive has been copied and **you have verified that the files you care about are safely stored**, you decide what happens next. You may keep the originals on the phone/cloud, remove some of them to reclaim space, or use another storage location as an additional backup. The toolkit does not automatically delete the source collection.
+
+### 💾 You choose where your archive lives
+
+Personal Photo Toolkit organizes the collection; **it does not prescribe where you must store it**. The result can live on an HDD, SSD, NAS, another computer, or a cloud-storage provider. If desired, you can also keep a second independent copy in another location.
+
+Archives may be packaged into ZIP files for easier transfer or storage, but a ZIP file by itself is not redundancy. If an HDD/SSD is the only copy and that device fails, the archive can still be lost. Users are responsible for choosing and verifying a storage/backup strategy appropriate for their files before deleting original copies.
+
+The project therefore follows a simple principle:
+
+> **Organize locally. Store where you want. Keep control of your files.**
 
 ## ✨ Three tools, one app
 
@@ -158,7 +171,19 @@ Videos/
 └── Unfiltered/
 ```
 
-It combines simple filename/dimension rules with a local CLIP image-classification model. AI can make mistakes, so uncertain images are intentionally sent to `Review` rather than deleted.
+### Cleaner v2: conservative multi-stage classification
+
+Cleaner no longer treats CLIP as the only decision maker. It first uses inexpensive evidence such as strong filename patterns, EXIF/camera metadata and screenshot dimensions. Images that still need semantic understanding are analyzed with the existing local CLIP model. Category prompts are aggregated before the final decision, and ambiguous results are deliberately routed to `Review` instead of being confidently placed in an unwanted category.
+
+This design is intended to improve useful classification **without adding another large AI model**. It also keeps the important safety rule: no source photo is automatically deleted.
+
+Three processing modes are available:
+
+- **Fast** — smaller analysis copies and less conservative thresholds.
+- **Balanced (recommended)** — good compromise between speed and cautious classification.
+- **Maximum precision** — larger analysis copies and stricter confidence/margin requirements; more borderline files may go to `Review`.
+
+The CSV report records the category, confidence and reason. Progress also reports photos/second and ETA. AI can still make mistakes, and the project does not claim a fixed accuracy percentage without a labeled evaluation set.
 
 ### Videos are never mixed with analyzed photos
 
@@ -183,6 +208,20 @@ Face recognition can involve biometric personal data depending on the purpose an
 Read the full **[Privacy / Datenschutz notice](PRIVACY.md)** before using face matching in a shared, organizational or otherwise sensitive setting.
 
 ---
+
+
+## 💽 Approximate installation size
+
+The toolkit is modular, so you do not need all AI components just to use **Organize by Year**. Exact disk usage varies by operating system, Python/package versions and model cache format. As a practical planning estimate:
+
+| Installation | Approximate local disk usage |
+|---|---:|
+| Core + Organize by Year | **under ~0.1 GB** in a normal source environment |
+| Trip Filter additions + `buffalo_l` model | **roughly ~0.7–1.2 GB additional** |
+| Photo Cleaner additions + CLIP model | **roughly ~1.0–1.8 GB additional** |
+| All three tools together | **roughly ~2–3 GB installed/cached** |
+
+Temporary installer/download caches can make the peak usage higher, sometimes around **3–5 GB**. These are planning estimates rather than guaranteed package sizes. The user's own photos and generated output are separate and can of course require much more storage. Cleaner v2 intentionally reuses the existing CLIP stack instead of adding another multi-gigabyte vision model.
 
 ## 📦 Easy installation for normal users
 
@@ -275,8 +314,8 @@ The core functions are separated from the Tkinter GUI so contributors can improv
 GitHub Actions contains a multi-platform build workflow for Windows, macOS and Linux. A maintainer can run it manually, or create a version tag:
 
 ```bash
-git tag v2.0.0
-git push origin v2.0.0
+git tag v2.4.0
+git push origin v2.4.0
 ```
 
 The workflow builds native artifacts and attaches them to a GitHub Release. See **[RELEASES.md](RELEASES.md)** for details.
@@ -355,3 +394,22 @@ Third-party dependencies and AI model weights retain their own licenses.
 The core GUI and **Organize by Year** do not import Trip Filter or Photo Cleaner AI libraries at startup. Trip Filter loads InsightFace/ONNX only when **Start trip filter** is clicked. Photo Cleaner loads Torch/Transformers/CLIP only when **Start cleaner** is clicked. This means an unavailable or Windows-blocked Trip Filter dependency must not prevent the core app or Photo Cleaner from opening.
 
 For a clean source installation, run `setup-windows.bat` first. Install only the feature you need with `install-trip-filter.bat` or `install-photo-cleaner.bat`.
+
+## Managed Windows PCs: isolated Photo Cleaner
+
+If you only want **Photo Cleaner**, especially on a work/university-managed Windows PC, use:
+
+```bat
+setup-cleaner-only-windows.bat
+start-cleaner-only-windows.bat
+```
+
+This creates a separate `.venv-cleaner` containing Core + Cleaner only. The setup performs an isolation check and fails if `insightface`, `scipy`, `skimage`, `onnx`, or `onnxruntime` are visible in that environment. This prevents old Trip Filter packages from leaking into the Cleaner runtime. Do **not** disable Windows security controls to make optional native AI components run.
+
+The normal source environment and `.venv-cleaner` are independent. Removing one does not remove the other.
+
+## On-demand feature installation (source builds)
+
+The source GUI now detects optional components automatically. If a user clicks **Trip Photo Filter** or **Photo Cleaner** and that feature pack is missing, the app asks for confirmation and installs only that feature into the toolkit's active virtual environment. Users no longer need to locate or run the feature `.bat`/shell scripts manually.
+
+Packaged/public executables deliberately do **not** run `pip` or modify themselves. Official release editions must ship the selected runtime dependencies already packaged and, where available, code-signed. The app never instructs users to disable Windows Defender, Smart App Control, Application Control, Gatekeeper, or equivalent security controls.

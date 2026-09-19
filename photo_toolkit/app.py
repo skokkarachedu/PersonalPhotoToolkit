@@ -6,6 +6,8 @@ import queue
 import json
 import os
 import webbrowser
+import importlib.util
+import subprocess
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -53,6 +55,78 @@ class PhotoToolkitApp(tk.Tk):
             self.settings[key] = True
             self._save_settings()
         return answer
+
+
+    def _missing_modules(self, modules):
+        return [name for name in modules if importlib.util.find_spec(name) is None]
+
+    def _ensure_feature(self, feature_name, extra_name, modules, retry_callback):
+        """Install an optional source feature pack on demand, then retry the action."""
+        missing = self._missing_modules(modules)
+        if not missing:
+            return True
+
+        # A frozen/public executable should not mutate itself with pip. Official release
+        # editions must ship their runtime dependencies already packaged/signed.
+        if getattr(sys, "frozen", False):
+            messagebox.showerror(
+                f"{feature_name} not included",
+                f"This edition does not include {feature_name}.\n\n"
+                "Download the corresponding feature edition (or Full edition) from the official Releases page. "
+                "The application will not run pip or weaken operating-system security from a packaged release."
+            )
+            return False
+
+        answer = messagebox.askyesno(
+            f"Install {feature_name}?",
+            f"{feature_name} needs additional components that are not installed yet.\n\n"
+            f"Missing: {', '.join(missing)}\n\n"
+            "Install the required components now?\n\n"
+            "They will be installed only into this toolkit's current Python environment. "
+            "This can take several minutes and requires an internet connection. "
+            "Do not disable Windows/macOS/Linux security controls if the operating system blocks a component."
+        )
+        if not answer:
+            return False
+
+        if self.worker and self.worker.is_alive():
+            messagebox.showwarning("Busy", "A task is already running.")
+            return False
+
+        self.cancel_event.clear()
+        self.cancel_btn.configure(state="disabled")
+        self.status.configure(text=f"Installing {feature_name}…")
+        self._log(f"Installing optional feature: {feature_name}")
+        self._log(f"Command: {Path(sys.executable).name} -m pip install -e .[{extra_name}]")
+
+        def install():
+            try:
+                project_root = Path(__file__).resolve().parent.parent
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "pip", "install", "-e", f".[{extra_name}]"],
+                    cwd=project_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    self._log(line.rstrip())
+                code = proc.wait()
+                if code != 0:
+                    raise RuntimeError(f"Installation exited with code {code}.")
+                importlib.invalidate_caches()
+                still_missing = self._missing_modules(modules)
+                if still_missing:
+                    raise RuntimeError("Installation finished, but these modules are still unavailable: " + ", ".join(still_missing))
+                self.log_queue.put(("feature_installed", feature_name, retry_callback))
+            except Exception as exc:
+                self.log_queue.put(("feature_install_error", feature_name, str(exc)))
+
+        self.worker = threading.Thread(target=install, daemon=True)
+        self.worker.start()
+        return False
 
     def _show_privacy(self):
         win = tk.Toplevel(self)
@@ -171,7 +245,7 @@ class PhotoToolkitApp(tk.Tk):
             text="Fast analyzes smaller copies; Balanced is recommended; Maximum precision uses full-size analysis and can be much slower. Originals are never resized or modified.",
             wraplength=800
         ).grid(row=9, column=1, sticky="w", padx=8, pady=(0,4))
-        ttk.Label(f, text="Uses local InsightFace buffalo_l (~326 MB model download on first use).", wraplength=760).grid(row=10, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(f, text="Optional Trip AI components are installed from the UI on first use. InsightFace buffalo_l (~326 MB) is downloaded when needed.", wraplength=760).grid(row=10, column=1, sticky="w", padx=8, pady=4)
         ttk.Button(f, text="Start trip filter", command=self._run_trip).grid(row=11, column=1, sticky="w", padx=8, pady=12)
 
     def _build_clean_tab(self):
@@ -184,12 +258,24 @@ class PhotoToolkitApp(tk.Tk):
 
         self.clean_source = self._path_picker(f, 1, "Photo folder")
         self.clean_dest = self._path_picker(f, 2, "Destination folder")
+        ttk.Label(f, text="Processing mode").grid(row=3, column=0, sticky="w", padx=10, pady=6)
+        self.clean_performance = tk.StringVar(value="balanced")
+        clean_mode_frame = ttk.Frame(f)
+        clean_mode_frame.grid(row=3, column=1, sticky="w", padx=8, pady=6)
+        ttk.Radiobutton(clean_mode_frame, text="Fast", value="fast", variable=self.clean_performance).pack(side="left", padx=(0, 14))
+        ttk.Radiobutton(clean_mode_frame, text="Balanced (recommended)", value="balanced", variable=self.clean_performance).pack(side="left", padx=(0, 14))
+        ttk.Radiobutton(clean_mode_frame, text="Maximum precision", value="precision", variable=self.clean_performance).pack(side="left")
         ttk.Label(
             f,
-            text="Requires the optional AI dependencies. The first run downloads the CLIP model.",
+            text="Cleaner v2 uses cheap metadata/filename checks first, then local AI only where needed. Ambiguous results go to Review. Maximum precision is more conservative and slower.",
+            wraplength=800
+        ).grid(row=4, column=1, sticky="w", padx=8, pady=(0,4))
+        ttk.Label(
+            f,
+            text="Optional AI components are installed from the UI only when you first use Cleaner. The CLIP model is then downloaded on first use.",
             wraplength=760
-        ).grid(row=3, column=1, sticky="w", padx=8, pady=8)
-        ttk.Button(f, text="Start cleaner", command=self._run_clean).grid(row=4, column=1, sticky="w", padx=8, pady=12)
+        ).grid(row=5, column=1, sticky="w", padx=8, pady=8)
+        ttk.Button(f, text="Start cleaner", command=self._run_clean).grid(row=6, column=1, sticky="w", padx=8, pady=12)
 
     def _log(self, message):
         self.log_queue.put(("log", str(message)))
@@ -219,6 +305,20 @@ class PhotoToolkitApp(tk.Tk):
                     self.cancel_btn.configure(state="disabled")
                     self.status.configure(text="Error")
                     messagebox.showerror("Error", item[1])
+                elif item[0] == "feature_installed":
+                    _, feature_name, retry_callback = item
+                    self.status.configure(text=f"{feature_name} installed")
+                    self._log(f"{feature_name} installation completed successfully.")
+                    messagebox.showinfo("Installation complete", f"{feature_name} is ready. The requested action will continue now.")
+                    self.after(50, retry_callback)
+                elif item[0] == "feature_install_error":
+                    _, feature_name, details = item
+                    self.status.configure(text="Installation failed")
+                    messagebox.showerror(
+                        "Installation failed",
+                        f"Could not install {feature_name}.\n\n{details}\n\n"
+                        "The rest of Personal Photo Toolkit remains usable. Do not disable operating-system security controls to force installation."
+                    )
         except queue.Empty:
             pass
         self.after(100, self._pump_log)
@@ -269,6 +369,10 @@ class PhotoToolkitApp(tk.Tk):
         if not paths:
             return
         src, refs, dst = paths
+        if not self._ensure_feature(
+            "Trip Photo Filter", "trip", ("numpy", "cv2", "insightface", "onnxruntime"), self._run_trip
+        ):
+            return
         if not self._first_use_consent(
             "trip_filter",
             "Trip Photo Filter needs InsightFace buffalo_l (approximately 326 MB) the first time it is used.",
@@ -307,6 +411,10 @@ class PhotoToolkitApp(tk.Tk):
         if not paths:
             return
         src, dst = paths
+        if not self._ensure_feature(
+            "Photo Cleaner", "cleaner", ("torch", "transformers", "safetensors"), self._run_clean
+        ):
+            return
         if not self._first_use_consent(
             "photo_cleaner",
             "Photo Cleaner needs a CLIP AI model. The model is downloaded on first use and cached locally.",
@@ -326,8 +434,9 @@ class PhotoToolkitApp(tk.Tk):
                 "Do not disable Windows security controls to run this feature.\n\nDetails: " + str(e)
             )
             return
+        performance_mode = self.clean_performance.get()
         self._start_worker(lambda: clean_photos(
-            src, dst, cancel_event=self.cancel_event,
+            src, dst, performance_mode=performance_mode, cancel_event=self.cancel_event,
             progress=self._progress, log=self._log
         ))
 

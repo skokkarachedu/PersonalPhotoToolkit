@@ -70,3 +70,6 @@ Thumbs.db
 !docs/images/
 !docs/images/*.png
 !docs/images/*.svg
+
+.venv-cleaner/
+.venv-trip/
